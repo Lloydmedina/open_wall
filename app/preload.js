@@ -51,6 +51,17 @@ if (process.isMainFrame && isLocalPage) {
         ipcRenderer.invoke("wallpaper:list-local", refresh === true)
       );
     },
+    addLocalFolder: async () => {
+      return await unwrap(ipcRenderer.invoke("wallpaper:add-local-folder"));
+    },
+    addLocalFiles: async () => {
+      return await unwrap(ipcRenderer.invoke("wallpaper:add-local-files"));
+    },
+    removeLocalPath: async (target) => {
+      return await unwrap(
+        ipcRenderer.invoke("wallpaper:remove-local-path", target)
+      );
+    },
     setLocalVideo: async (filePath) => {
       await unwrap(ipcRenderer.invoke("wallpaper:set-local-video", filePath));
     },

@@ -8,10 +8,11 @@ looping live-video wallpapers, no account and no paywall.
 - **Wallpaper catalog** — browse a curated library of images and videos
 - **Live video wallpapers** — MP4/WebM playback behind your desktop icons
   (multi-monitor: one window per display)
-- **Wallpaper Engine import** — scans your Steam Workshop downloads
-  (`steamapps/workshop/content/431960`) and plays video-type wallpapers
-  directly; scene-type wallpapers can be applied as static images via their
-  previews. Open the **Local library** button in the bottom-right corner.
+- **Local library scan** — scans your local wallpaper folders for video
+  items and plays them directly; other items can be applied as static
+  images via their previews. Open the **Local library** button in the
+  bottom-right corner. **Add folder** / **Add files** lets you point it at
+  your own folders or media files on top of the default scan.
 - **Custom app icon** — Settings panel lets you swap the window/taskbar/tray
   icon and stamp it onto a desktop shortcut, like Windows' own "Change Icon"
 - **Tray control** — while a video wallpaper is running, a tray icon offers
@@ -37,6 +38,7 @@ npm start
 
 ```bat
 npm run dist
+or just find the .exe file in the dist folder
 ```
 
 Outputs `dist\OpenWall.exe` (single portable executable, no install needed).
@@ -56,8 +58,8 @@ Outputs `dist\OpenWall.exe` (single portable executable, no install needed).
 - The online catalog streams thumbnails and media from
   `cdn.livelywallpaper.app` — internet access is needed for browsing, but
   imported local wallpapers work fully offline.
-- Interactive "scene" wallpapers use Wallpaper Engine's proprietary `.pkg`
-  format and can only be rendered by Wallpaper Engine itself.
+- Interactive "scene" wallpapers use a proprietary `.pkg` format that this
+  app cannot render; apply them as static images via their previews.
 
 ## License
 

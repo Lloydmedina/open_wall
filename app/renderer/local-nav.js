@@ -27,7 +27,7 @@
   }
 
   function init() {
-    navButton("Local library", "./we-library.html", 22);
+    navButton("Local library", "./local-library.html", 22);
     navButton("Settings", "./settings.html", 74);
   }
 

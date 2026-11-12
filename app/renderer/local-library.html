@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Wallpaper Engine Library</title>
+    <title>Local Library</title>
     <style>
       @font-face {
         font-family: "Plus Jakarta Sans";
@@ -36,6 +36,33 @@
       .btn:disabled { opacity: 0.45; cursor: default; }
       .btn.primary { background: #3d63f3; border-color: #3d63f3; }
       .btn.primary:hover { background: #5475f5; }
+      .paths { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+      .path-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid #2a3350;
+        background: #141a2b;
+        color: #aeb8d4;
+        border-radius: 999px;
+        padding: 5px 8px 5px 12px;
+        font-size: 12px;
+        max-width: 420px;
+      }
+      .path-chip span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .path-chip button {
+        border: none;
+        background: transparent;
+        color: #8b93a7;
+        cursor: pointer;
+        font-size: 13px;
+        padding: 0 4px;
+      }
+      .path-chip button:hover { color: #f19ba4; }
       .filters { display: flex; gap: 8px; margin: 22px 0 18px; flex-wrap: wrap; }
       .chip {
         border: 1px solid #2a3350;
@@ -119,13 +146,16 @@
     <header>
       <button class="btn" id="back">&#8592; Catalog</button>
       <div>
-        <h1>Wallpaper Engine library</h1>
-        <p class="sub" id="subtitle">Scanning Steam workshop items…</p>
+        <h1>Local library</h1>
+        <p class="sub" id="subtitle">Scanning local folders…</p>
       </div>
       <div class="spacer"></div>
+      <button class="btn" id="add-files">Add files</button>
+      <button class="btn" id="add-folder">Add folder</button>
       <button class="btn" id="refresh">Rescan</button>
     </header>
 
+    <div class="paths" id="paths"></div>
     <div id="status"></div>
     <div class="filters" id="filters"></div>
     <div class="grid" id="grid"></div>
@@ -144,12 +174,57 @@
       const FILTERS = [
         ["all", "All"],
         ["video", "Live video"],
+        ["image", "Images"],
         ["scene", "Scene"],
         ["web", "Web"],
       ];
 
       document.getElementById("back").onclick = () => (location.href = "./index.html");
       document.getElementById("refresh").onclick = () => load(true);
+      document.getElementById("add-folder").onclick = () => {
+        if (api) addPaths(api.addLocalFolder());
+      };
+      document.getElementById("add-files").onclick = () => {
+        if (api) addPaths(api.addLocalFiles());
+      };
+
+      async function addPaths(promise) {
+        if (!api) return;
+        try {
+          const res = await promise;
+          if (res && res.added) setStatus("ok", res.added + " added to the local library.");
+        } catch (err) {
+          setStatus("err", err && err.message ? err.message : String(err));
+          return;
+        }
+        load(true);
+      }
+
+      function renderPaths(customPaths) {
+        const el = document.getElementById("paths");
+        el.innerHTML = "";
+        for (const p of customPaths || []) {
+          const chip = document.createElement("div");
+          chip.className = "path-chip";
+          const label = document.createElement("span");
+          label.textContent = p;
+          label.title = p;
+          const remove = document.createElement("button");
+          remove.textContent = "✕";
+          remove.title = "Remove";
+          remove.onclick = async () => {
+            try {
+              await api.removeLocalPath(p);
+            } catch (err) {
+              setStatus("err", err && err.message ? err.message : String(err));
+            }
+            load(true);
+          };
+          chip.appendChild(label);
+          chip.appendChild(remove);
+          el.appendChild(chip);
+        }
+      }
 
       function setStatus(kind, text) {
         statusEl.className = kind;
@@ -203,17 +278,21 @@
           }
           if (item.videoPath) {
             let video = null;
-            thumb.addEventListener("mouseenter", () => {
+            const ensureVideo = () => {
               if (!video) {
                 video = document.createElement("video");
                 video.src = item.videoUrl;
                 video.muted = true;
                 video.loop = true;
                 video.playsInline = true;
-                video.preload = "auto";
+                video.preload = item.previewUrl ? "auto" : "metadata";
                 thumb.appendChild(video);
               }
-              video.play().catch(() => {});
+              return video;
+            };
+            if (!item.previewUrl) ensureVideo();
+            thumb.addEventListener("mouseenter", () => {
+              ensureVideo().play().catch(() => {});
             });
             thumb.addEventListener("mouseleave", () => {
               if (video) video.pause();
@@ -248,7 +327,7 @@
           if (!actions.children.length) {
             const note = document.createElement("div");
             note.className = "sub";
-            note.textContent = "Needs Wallpaper Engine to play.";
+            note.textContent = "Not playable by this app.";
             actions.appendChild(note);
           }
           info.appendChild(actions);
@@ -284,14 +363,15 @@
           subtitle.textContent = "This page must be opened inside the app.";
           return;
         }
-        subtitle.textContent = "Scanning Steam workshop items…";
+        subtitle.textContent = "Scanning local folders…";
         try {
           const res = await api.listLocal(refresh === true);
           items = res.items || [];
+          renderPaths(res.customPaths);
           const playable = items.filter((i) => i.videoPath).length;
           subtitle.textContent = (res.dirs && res.dirs.length
             ? res.dirs.join("  ·  ") + " — "
-            : "Workshop folder not found — is Wallpaper Engine installed? ") +
+            : "No local library folder found — ") +
             items.length + " items, " + playable + " playable as live video";
           render();
         } catch (err) {

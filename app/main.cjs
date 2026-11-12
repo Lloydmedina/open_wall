@@ -37,7 +37,8 @@ const VIDEO_HWNDS_ENV = "VIDEO_WALLPAPER_HWNDS";
 const VIDEO_FAIL_MESSAGE = "The video cannot be played on this computer.";
 const CUSTOM_ICON_FILE = "custom-icon.png";
 const SHORTCUT_ICO_FILE = "app-icon.ico";
-const WE_WORKSHOP_APP = "431960";
+const LOCAL_LIBRARY_APP_ID = "431960";
+const LOCAL_PATHS_FILE = "local-paths.json";
 const LOCAL_VIDEO_EXTS = new Set([".mp4", ".webm"]);
 const LOCAL_IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".bmp"]);
 
@@ -482,11 +483,11 @@ const fetchVideo = (url, onProgress) =>
     fetchMedia(url, VIDEO_TYPES, "Only MP4 and WebM videos can be set as wallpaper.", onProgress)
   );
 
-// --- Wallpaper Engine workshop library --------------------------------------------
+// --- Local wallpaper library -------------------------------------------------------
 
-let workshopDirsPromise = null;
+let localDirsPromise = null;
 
-async function steamLibraryRoots() {
+async function localLibraryRoots() {
   const roots = new Set([
     path.join(
       process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
@@ -516,24 +517,67 @@ async function steamLibraryRoots() {
   return roots;
 }
 
-function findWorkshopDirs() {
-  if (!workshopDirsPromise) {
-    workshopDirsPromise = (async () => {
+const customPathsFile = () =>
+  path.join(app.getPath("userData"), LOCAL_PATHS_FILE);
+
+async function readCustomPaths() {
+  try {
+    const data = JSON.parse(await fsp.readFile(customPathsFile(), "utf8"));
+    const paths = Array.isArray(data.paths) ? data.paths : [];
+    return paths.filter(
+      (p) => typeof p === "string" && p && path.isAbsolute(p)
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function writeCustomPaths(paths) {
+  await fsp.mkdir(app.getPath("userData"), { recursive: true });
+  await fsp.writeFile(customPathsFile(), JSON.stringify({ paths }));
+}
+
+async function addCustomPaths(newPaths) {
+  const current = await readCustomPaths();
+  const seen = new Set(current.map((p) => path.resolve(p)));
+  for (const p of newPaths) {
+    const resolved = path.resolve(String(p));
+    if (!seen.has(resolved)) {
+      seen.add(resolved);
+      current.push(resolved);
+    }
+  }
+  await writeCustomPaths(current);
+  return current;
+}
+
+async function removeCustomPath(target) {
+  const resolved = path.resolve(String(target));
+  const next = (await readCustomPaths()).filter(
+    (p) => path.resolve(p) !== resolved
+  );
+  await writeCustomPaths(next);
+  return next;
+}
+
+function findLocalDirs() {
+  if (!localDirsPromise) {
+    localDirsPromise = (async () => {
       const found = [];
-      for (const root of await steamLibraryRoots()) {
+      for (const root of await localLibraryRoots()) {
         const dir = path.join(
           root,
           "steamapps",
           "workshop",
           "content",
-          WE_WORKSHOP_APP
+          LOCAL_LIBRARY_APP_ID
         );
         if (await fileExists(dir)) found.push(dir);
       }
       return found;
     })();
   }
-  return workshopDirsPromise;
+  return localDirsPromise;
 }
 
 const pickFile = (dirEntries, fileName, exts) => {
@@ -543,7 +587,23 @@ const pickFile = (dirEntries, fileName, exts) => {
   return found && exts.has(path.extname(found).toLowerCase()) ? found : null;
 };
 
-async function readWorkshopItem(itemDir, id) {
+function fileItem(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const isVideo = LOCAL_VIDEO_EXTS.has(ext);
+  const isImage = LOCAL_IMAGE_EXTS.has(ext);
+  if (!isVideo && !isImage) return null;
+  return {
+    id: filePath,
+    title: path.basename(filePath, path.extname(filePath)),
+    type: isVideo ? "video" : "image",
+    previewUrl: isImage ? pathToFileURL(filePath).href : null,
+    videoUrl: isVideo ? pathToFileURL(filePath).href : null,
+    videoPath: isVideo ? filePath : null,
+    imagePath: isImage ? filePath : null,
+  };
+}
+
+async function readLocalItem(itemDir, id, loose = false) {
   let meta = {};
   try {
     meta = JSON.parse(
@@ -559,11 +619,14 @@ async function readWorkshopItem(itemDir, id) {
 
   const previewName =
     names.find((n) => n.toLowerCase() === String(meta.preview ?? "").toLowerCase()) ??
-    names.find((n) => /^preview\.(jpe?g|png|bmp|gif)$/i.test(n));
+    names.find((n) => /^preview\.(jpe?g|png|bmp|gif)$/i.test(n)) ??
+    (loose
+      ? names.find((n) => LOCAL_IMAGE_EXTS.has(path.extname(n).toLowerCase()))
+      : undefined);
   const previewPath = previewName ? path.join(itemDir, previewName) : null;
 
   let videoPath = null;
-  if (meta.type === "video") {
+  if (meta.type === "video" || loose) {
     const file =
       pickFile(names, meta.file, LOCAL_VIDEO_EXTS) ??
       names.find((n) => LOCAL_VIDEO_EXTS.has(path.extname(n).toLowerCase()));
@@ -577,7 +640,9 @@ async function readWorkshopItem(itemDir, id) {
   return {
     id,
     title: String(meta.title || id),
-    type: String(meta.type || "unknown"),
+    type: String(
+      meta.type || (videoPath ? "video" : imagePath ? "image" : "unknown")
+    ),
     previewUrl: previewPath ? pathToFileURL(previewPath).href : null,
     videoUrl: videoPath ? pathToFileURL(videoPath).href : null,
     videoPath,
@@ -585,12 +650,28 @@ async function readWorkshopItem(itemDir, id) {
   };
 }
 
-async function listWorkshopWallpapers(refresh) {
-  if (refresh) workshopDirsPromise = null;
-  const dirs = await findWorkshopDirs();
+async function listLocalWallpapers(refresh) {
+  if (refresh) localDirsPromise = null;
+  const dirs = [...(await findLocalDirs())];
+  const customPaths = await readCustomPaths();
+  const customDirs = new Set();
+  const customFiles = [];
+  for (const p of customPaths) {
+    try {
+      const stat = await fsp.stat(p);
+      if (stat.isDirectory()) {
+        dirs.push(p);
+        customDirs.add(p);
+      } else if (stat.isFile()) {
+        customFiles.push(p);
+      }
+    } catch {}
+  }
+
   const items = [];
   const seen = new Set();
   for (const dir of dirs) {
+    const loose = customDirs.has(dir);
     let entries;
     try {
       entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -598,18 +679,29 @@ async function listWorkshopWallpapers(refresh) {
       continue;
     }
     for (const entry of entries) {
-      if (!entry.isDirectory() || seen.has(entry.name)) continue;
-      seen.add(entry.name);
-      const item = await readWorkshopItem(path.join(dir, entry.name), entry.name);
-      if (item) items.push(item);
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const key = loose ? fullPath : entry.name;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const item = await readLocalItem(fullPath, entry.name, loose);
+        if (item) items.push(item);
+      } else if (loose && entry.isFile()) {
+        const item = fileItem(fullPath);
+        if (item) items.push(item);
+      }
     }
+  }
+  for (const file of customFiles) {
+    const item = fileItem(file);
+    if (item) items.push(item);
   }
   items.sort(
     (a, b) =>
       Number(Boolean(b.videoPath)) - Number(Boolean(a.videoPath)) ||
       a.title.localeCompare(b.title)
   );
-  return { dirs, items };
+  return { dirs, customPaths, items };
 }
 
 async function assertLocalMediaPath(filePath, exts) {
@@ -620,11 +712,13 @@ async function assertLocalMediaPath(filePath, exts) {
     throw new Error("This file type is not supported.");
   }
   const resolved = path.resolve(filePath);
-  const inside = (await findWorkshopDirs()).some(
-    (dir) => resolved === dir || resolved.startsWith(dir + path.sep)
-  );
+  const roots = [...(await findLocalDirs()), ...(await readCustomPaths())];
+  const inside = roots.some((root) => {
+    const base = path.resolve(root);
+    return resolved === base || resolved.startsWith(base + path.sep);
+  });
   if (!inside) {
-    throw new Error("File must be inside the Wallpaper Engine workshop folder.");
+    throw new Error("File must be inside a local library folder.");
   }
   if (!(await fileExists(resolved))) throw new Error("File not found.");
   return resolved;
@@ -981,9 +1075,65 @@ ipcMain.handle("wallpaper:download", async (event, url, name) => {
 ipcMain.handle("wallpaper:list-local", async (event, refresh) => {
   assertLocalSender(event);
   try {
-    return await listWorkshopWallpapers(refresh === true);
+    return await listLocalWallpapers(refresh === true);
   } catch (err) {
-    log(`Workshop scan failed: ${errorText(err)}`);
+    log(`Local library scan failed: ${errorText(err)}`);
+    return { error: errorText(err) };
+  }
+});
+
+ipcMain.handle("wallpaper:add-local-folder", async (event) => {
+  assertLocalSender(event);
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: "Choose folders to scan",
+    properties: ["openDirectory", "multiSelections", "dontAddToRecent"],
+  });
+  if (canceled || !filePaths.length) return { added: 0 };
+  try {
+    const paths = await addCustomPaths(filePaths);
+    return { added: filePaths.length, paths };
+  } catch (err) {
+    log(`Add local folder failed: ${errorText(err)}`);
+    return { error: errorText(err) };
+  }
+});
+
+ipcMain.handle("wallpaper:add-local-files", async (event) => {
+  assertLocalSender(event);
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: "Choose wallpaper files",
+    filters: [
+      { name: "Media", extensions: ["mp4", "webm", "jpg", "jpeg", "png", "bmp"] },
+      { name: "All files", extensions: ["*"] },
+    ],
+    properties: ["openFile", "multiSelections", "dontAddToRecent"],
+  });
+  if (canceled || !filePaths.length) return { added: 0 };
+  try {
+    const media = filePaths.filter((p) => {
+      const ext = path.extname(p).toLowerCase();
+      return LOCAL_VIDEO_EXTS.has(ext) || LOCAL_IMAGE_EXTS.has(ext);
+    });
+    const paths = await addCustomPaths(media);
+    return { added: media.length, paths };
+  } catch (err) {
+    log(`Add local files failed: ${errorText(err)}`);
+    return { error: errorText(err) };
+  }
+});
+
+ipcMain.handle("wallpaper:remove-local-path", async (event, target) => {
+  assertLocalSender(event);
+  if (typeof target !== "string" || !path.isAbsolute(target)) {
+    return { error: "Invalid path." };
+  }
+  try {
+    const paths = await removeCustomPath(target);
+    return { paths };
+  } catch (err) {
+    log(`Remove local path failed: ${errorText(err)}`);
     return { error: errorText(err) };
   }
 });
