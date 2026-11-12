@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings</title>
+    <style>
+      @font-face {
+        font-family: "Plus Jakarta Sans";
+        src: url("./assets/plus-jakarta-sans-wght-normal-eXO_dkmS.woff2") format("woff2");
+        font-weight: 100 900;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: #0b0f1a;
+        color: #e6eaf2;
+        font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+        padding: 28px 32px 48px;
+      }
+      header { display: flex; align-items: center; gap: 16px; }
+      h1 { font-size: 20px; font-weight: 700; margin: 0; }
+      .sub { color: #8b93a7; font-size: 13px; margin: 4px 0 0; }
+      .btn {
+        border: 1px solid #2a3350;
+        background: #141a2b;
+        color: #e6eaf2;
+        border-radius: 10px;
+        padding: 9px 16px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .btn:hover { background: #1b2338; border-color: #3a4770; }
+      .btn:disabled { opacity: 0.45; cursor: default; }
+      .btn.primary { background: #3d63f3; border-color: #3d63f3; }
+      .btn.primary:hover { background: #5475f5; }
+      .panel {
+        margin-top: 26px;
+        max-width: 560px;
+        background: #121829;
+        border: 1px solid #232c45;
+        border-radius: 14px;
+        padding: 24px;
+      }
+      .panel h2 { font-size: 15px; margin: 0 0 6px; }
+      .panel .hint { color: #8b93a7; font-size: 12.5px; margin: 0 0 18px; line-height: 1.5; }
+      .icon-row { display: flex; align-items: center; gap: 20px; }
+      .icon-preview {
+        width: 96px;
+        height: 96px;
+        border-radius: 18px;
+        border: 1px solid #2a3350;
+        background:
+          repeating-conic-gradient(#161d33 0% 25%, #10152a 0% 50%) 0 0 / 20px 20px;
+        object-fit: contain;
+        padding: 8px;
+      }
+      .icon-actions { display: flex; flex-direction: column; gap: 10px; }
+      #status {
+        display: none;
+        margin-top: 16px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 13px;
+      }
+      #status.ok { display: block; background: #15351f; color: #7fd99a; border: 1px solid #1f5531; }
+      #status.err { display: block; background: #3a1d22; color: #f19ba4; border: 1px solid #5c2830; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <button class="btn" id="back">&#8592; Catalog</button>
+      <div>
+        <h1>Settings</h1>
+        <p class="sub">Customize the app</p>
+      </div>
+    </header>
+
+    <div class="panel">
+      <h2>App icon</h2>
+      <p class="hint">
+        Pick any image — it's applied to the app window, taskbar and tray icon,
+        and remembered across restarts. You can also pin it to a desktop
+        shortcut, like Windows' own "Change Icon" dialog.
+      </p>
+      <div class="icon-row">
+        <img class="icon-preview" id="preview" alt="Current app icon" />
+        <div class="icon-actions">
+          <button class="btn primary" id="pick">Change icon…</button>
+          <button class="btn" id="reset">Reset to default</button>
+          <button class="btn" id="shortcut">Create desktop shortcut</button>
+        </div>
+      </div>
+      <div id="status"></div>
+    </div>
+
+    <script>
+      const api = window.electronSettings;
+      const preview = document.getElementById("preview");
+      const statusEl = document.getElementById("status");
+
+      document.getElementById("back").onclick = () => (location.href = "./index.html");
+
+      function setStatus(kind, text) {
+        statusEl.className = kind;
+        statusEl.textContent = text || "";
+      }
+
+      async function refreshIcon() {
+        if (!api) return;
+        const res = await api.getIcon();
+        if (res && res.iconUrl) preview.src = res.iconUrl;
+      }
+
+      document.getElementById("pick").onclick = async () => {
+        setStatus("", "");
+        try {
+          const res = await api.pickIcon();
+          if (res && res.error) return setStatus("err", res.error);
+          if (res && res.changed) {
+            if (res.iconUrl) preview.src = res.iconUrl;
+            setStatus("ok", "Icon updated. Check the taskbar!");
+          }
+        } catch (err) {
+          setStatus("err", err.message || String(err));
+        }
+      };
+
+      document.getElementById("reset").onclick = async () => {
+        setStatus("", "");
+        try {
+          const res = await api.resetIcon();
+          if (res && res.error) return setStatus("err", res.error);
+          if (res && res.iconUrl) preview.src = res.iconUrl;
+          setStatus("ok", "Default icon restored.");
+        } catch (err) {
+          setStatus("err", err.message || String(err));
+        }
+      };
+
+      document.getElementById("shortcut").onclick = async () => {
+        setStatus("", "");
+        try {
+          const res = await api.createShortcut();
+          if (res && res.error) return setStatus("err", res.error);
+          if (res && res.shortcutPath) {
+            setStatus("ok", "Shortcut created: " + res.shortcutPath);
+          }
+        } catch (err) {
+          setStatus("err", err.message || String(err));
+        }
+      };
+
+      if (!api) setStatus("err", "This page must be opened inside the app.");
+      refreshIcon();
+    </script>
+  </body>
+</html>

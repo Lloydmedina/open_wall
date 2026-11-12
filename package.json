@@ -1,0 +1,35 @@
+{
+  "name": "open-wall",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Open Wall — free desktop wallpaper browser for Windows (images + live video)",
+  "main": "app/main.cjs",
+  "productName": "Open Wall",
+  "author": "Open Wall contributors",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.openwall.app",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "portable",
+      "icon": "app/icon.png"
+    },
+    "portable": {
+      "artifactName": "OpenWall.exe"
+    },
+    "files": [
+      "app/**/*"
+    ],
+    "asar": true
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}

@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wallpaper Engine Library</title>
+    <style>
+      @font-face {
+        font-family: "Plus Jakarta Sans";
+        src: url("./assets/plus-jakarta-sans-wght-normal-eXO_dkmS.woff2") format("woff2");
+        font-weight: 100 900;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: #0b0f1a;
+        color: #e6eaf2;
+        font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+        padding: 28px 32px 48px;
+      }
+      header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+      h1 { font-size: 20px; font-weight: 700; margin: 0; }
+      .sub { color: #8b93a7; font-size: 13px; margin: 4px 0 0; }
+      .btn {
+        border: 1px solid #2a3350;
+        background: #141a2b;
+        color: #e6eaf2;
+        border-radius: 10px;
+        padding: 9px 16px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .btn:hover { background: #1b2338; border-color: #3a4770; }
+      .btn:disabled { opacity: 0.45; cursor: default; }
+      .btn.primary { background: #3d63f3; border-color: #3d63f3; }
+      .btn.primary:hover { background: #5475f5; }
+      .filters { display: flex; gap: 8px; margin: 22px 0 18px; flex-wrap: wrap; }
+      .chip {
+        border: 1px solid #2a3350;
+        background: transparent;
+        color: #8b93a7;
+        border-radius: 999px;
+        padding: 6px 14px;
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .chip.active { background: #3d63f3; border-color: #3d63f3; color: #fff; }
+      #status {
+        display: none;
+        margin: 0 0 16px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 13px;
+      }
+      #status.ok { display: block; background: #15351f; color: #7fd99a; border: 1px solid #1f5531; }
+      #status.err { display: block; background: #3a1d22; color: #f19ba4; border: 1px solid #5c2830; }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 18px;
+      }
+      .card {
+        background: #121829;
+        border: 1px solid #232c45;
+        border-radius: 14px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .thumb {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        background: #0a0e18;
+      }
+      .thumb img, .thumb video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .thumb .badge {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 2;
+        background: rgba(8, 11, 20, 0.8);
+        border: 1px solid #2a3350;
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #aeb8d4;
+      }
+      .info { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+      .title {
+        font-size: 13.5px;
+        font-weight: 600;
+        line-height: 1.35;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+      .actions { display: flex; gap: 8px; margin-top: auto; }
+      .actions .btn { flex: 1; padding: 8px 10px; font-size: 12.5px; }
+      .empty { color: #8b93a7; font-size: 14px; margin-top: 60px; text-align: center; }
+      .spacer { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <button class="btn" id="back">&#8592; Catalog</button>
+      <div>
+        <h1>Wallpaper Engine library</h1>
+        <p class="sub" id="subtitle">Scanning Steam workshop items…</p>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn" id="refresh">Rescan</button>
+    </header>
+
+    <div id="status"></div>
+    <div class="filters" id="filters"></div>
+    <div class="grid" id="grid"></div>
+
+    <script>
+      const api = window.electronWallpaper;
+      const grid = document.getElementById("grid");
+      const filtersEl = document.getElementById("filters");
+      const subtitle = document.getElementById("subtitle");
+      const statusEl = document.getElementById("status");
+
+      let items = [];
+      let filter = "all";
+      let busy = false;
+
+      const FILTERS = [
+        ["all", "All"],
+        ["video", "Live video"],
+        ["scene", "Scene"],
+        ["web", "Web"],
+      ];
+
+      document.getElementById("back").onclick = () => (location.href = "./index.html");
+      document.getElementById("refresh").onclick = () => load(true);
+
+      function setStatus(kind, text) {
+        statusEl.className = kind;
+        statusEl.textContent = text || "";
+      }
+
+      function badgeLabel(item) {
+        if (item.type === "video") return item.videoPath ? "video" : "video*";
+        return item.type;
+      }
+
+      function render() {
+        filtersEl.innerHTML = "";
+        for (const [id, label] of FILTERS) {
+          const count =
+            id === "all" ? items.length : items.filter((i) => i.type === id).length;
+          if (id !== "all" && count === 0) continue;
+          const chip = document.createElement("button");
+          chip.className = "chip" + (filter === id ? " active" : "");
+          chip.textContent = `${label} (${count})`;
+          chip.onclick = () => { filter = id; render(); };
+          filtersEl.appendChild(chip);
+        }
+
+        grid.innerHTML = "";
+        const shown = items.filter((i) => filter === "all" || i.type === filter);
+        if (!shown.length) {
+          const p = document.createElement("p");
+          p.className = "empty";
+          p.textContent = "No wallpapers in this category.";
+          grid.appendChild(p);
+          return;
+        }
+
+        for (const item of shown) {
+          const card = document.createElement("div");
+          card.className = "card";
+
+          const thumb = document.createElement("div");
+          thumb.className = "thumb";
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = badgeLabel(item);
+          thumb.appendChild(badge);
+          if (item.previewUrl) {
+            const img = document.createElement("img");
+            img.src = item.previewUrl;
+            img.loading = "lazy";
+            img.draggable = false;
+            thumb.appendChild(img);
+          }
+          if (item.videoPath) {
+            let video = null;
+            thumb.addEventListener("mouseenter", () => {
+              if (!video) {
+                video = document.createElement("video");
+                video.src = item.videoUrl;
+                video.muted = true;
+                video.loop = true;
+                video.playsInline = true;
+                video.preload = "auto";
+                thumb.appendChild(video);
+              }
+              video.play().catch(() => {});
+            });
+            thumb.addEventListener("mouseleave", () => {
+              if (video) video.pause();
+            });
+          }
+          card.appendChild(thumb);
+
+          const info = document.createElement("div");
+          info.className = "info";
+          const title = document.createElement("div");
+          title.className = "title";
+          title.textContent = item.title;
+          title.title = item.title;
+          info.appendChild(title);
+
+          const actions = document.createElement("div");
+          actions.className = "actions";
+          if (item.videoPath) {
+            actions.appendChild(
+              actionButton("Set live", "primary", () =>
+                api.setLocalVideo(item.videoPath)
+              )
+            );
+          }
+          if (item.imagePath) {
+            actions.appendChild(
+              actionButton("Set as image", "", () =>
+                api.setLocalImage(item.imagePath)
+              )
+            );
+          }
+          if (!actions.children.length) {
+            const note = document.createElement("div");
+            note.className = "sub";
+            note.textContent = "Needs Wallpaper Engine to play.";
+            actions.appendChild(note);
+          }
+          info.appendChild(actions);
+          card.appendChild(info);
+          grid.appendChild(card);
+        }
+      }
+
+      function actionButton(label, cls, run) {
+        const btn = document.createElement("button");
+        btn.className = ("btn " + cls).trim();
+        btn.textContent = label;
+        btn.onclick = async () => {
+          if (busy) return;
+          busy = true;
+          btn.disabled = true;
+          setStatus("", "");
+          try {
+            await run();
+            setStatus("ok", "Wallpaper applied.");
+          } catch (err) {
+            setStatus("err", err && err.message ? err.message : String(err));
+          } finally {
+            busy = false;
+            btn.disabled = false;
+          }
+        };
+        return btn;
+      }
+
+      async function load(refresh) {
+        if (!api) {
+          subtitle.textContent = "This page must be opened inside the app.";
+          return;
+        }
+        subtitle.textContent = "Scanning Steam workshop items…";
+        try {
+          const res = await api.listLocal(refresh === true);
+          items = res.items || [];
+          const playable = items.filter((i) => i.videoPath).length;
+          subtitle.textContent = (res.dirs && res.dirs.length
+            ? res.dirs.join("  ·  ") + " — "
+            : "Workshop folder not found — is Wallpaper Engine installed? ") +
+            items.length + " items, " + playable + " playable as live video";
+          render();
+        } catch (err) {
+          subtitle.textContent =
+            "Scan failed: " + (err && err.message ? err.message : String(err));
+        }
+      }
+
+      load(false);
+    </script>
+  </body>
+</html>
