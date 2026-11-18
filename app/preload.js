@@ -62,6 +62,11 @@ if (process.isMainFrame && isLocalPage) {
         ipcRenderer.invoke("wallpaper:remove-local-path", target)
       );
     },
+    saveLocalMedia: async (filePath, name) => {
+      return await unwrap(
+        ipcRenderer.invoke("wallpaper:save-local-media", filePath, name)
+      );
+    },
     setLocalVideo: async (filePath) => {
       await unwrap(ipcRenderer.invoke("wallpaper:set-local-video", filePath));
     },

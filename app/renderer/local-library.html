@@ -324,6 +324,17 @@
               )
             );
           }
+          const mediaPath = item.videoPath || item.imagePath;
+          if (mediaPath) {
+            actions.appendChild(
+              actionButton("Keep", "", () =>
+                api.saveLocalMedia(mediaPath, item.title),
+              (res) =>
+                res && res.alreadyInLibrary
+                  ? "Already in your library."
+                  : "Saved to your library.")
+            );
+          }
           if (!actions.children.length) {
             const note = document.createElement("div");
             note.className = "sub";
@@ -336,7 +347,7 @@
         }
       }
 
-      function actionButton(label, cls, run) {
+      function actionButton(label, cls, run, success) {
         const btn = document.createElement("button");
         btn.className = ("btn " + cls).trim();
         btn.textContent = label;
@@ -346,8 +357,12 @@
           btn.disabled = true;
           setStatus("", "");
           try {
-            await run();
-            setStatus("ok", "Wallpaper applied.");
+            const res = await run();
+            setStatus(
+              "ok",
+              (typeof success === "function" ? success(res) : success) ||
+                "Wallpaper applied."
+            );
           } catch (err) {
             setStatus("err", err && err.message ? err.message : String(err));
           } finally {

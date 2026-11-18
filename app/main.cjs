@@ -39,6 +39,7 @@ const CUSTOM_ICON_FILE = "custom-icon.png";
 const SHORTCUT_ICO_FILE = "app-icon.ico";
 const LOCAL_LIBRARY_APP_ID = "431960";
 const LOCAL_PATHS_FILE = "local-paths.json";
+const OWN_LIBRARY_DIR = "library";
 const LOCAL_VIDEO_EXTS = new Set([".mp4", ".webm"]);
 const LOCAL_IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".bmp"]);
 
@@ -520,6 +521,12 @@ async function localLibraryRoots() {
 const customPathsFile = () =>
   path.join(app.getPath("userData"), LOCAL_PATHS_FILE);
 
+const ownLibraryDir = () =>
+  path.join(app.getPath("userData"), OWN_LIBRARY_DIR);
+
+const sanitizeName = (name) =>
+  String(name ?? "").replace(/[\\/:*?"<>|]/g, "_").trim();
+
 async function readCustomPaths() {
   try {
     const data = JSON.parse(await fsp.readFile(customPathsFile(), "utf8"));
@@ -626,7 +633,7 @@ async function readLocalItem(itemDir, id, loose = false) {
   const previewPath = previewName ? path.join(itemDir, previewName) : null;
 
   let videoPath = null;
-  if (meta.type === "video" || loose) {
+  if (String(meta.type).toLowerCase() === "video" || loose) {
     const file =
       pickFile(names, meta.file, LOCAL_VIDEO_EXTS) ??
       names.find((n) => LOCAL_VIDEO_EXTS.has(path.extname(n).toLowerCase()));
@@ -642,7 +649,7 @@ async function readLocalItem(itemDir, id, loose = false) {
     title: String(meta.title || id),
     type: String(
       meta.type || (videoPath ? "video" : imagePath ? "image" : "unknown")
-    ),
+    ).toLowerCase(),
     previewUrl: previewPath ? pathToFileURL(previewPath).href : null,
     videoUrl: videoPath ? pathToFileURL(videoPath).href : null,
     videoPath,
@@ -656,6 +663,11 @@ async function listLocalWallpapers(refresh) {
   const customPaths = await readCustomPaths();
   const customDirs = new Set();
   const customFiles = [];
+  const ownDir = ownLibraryDir();
+  if (await fileExists(ownDir)) {
+    dirs.push(ownDir);
+    customDirs.add(ownDir);
+  }
   for (const p of customPaths) {
     try {
       const stat = await fsp.stat(p);
@@ -712,7 +724,11 @@ async function assertLocalMediaPath(filePath, exts) {
     throw new Error("This file type is not supported.");
   }
   const resolved = path.resolve(filePath);
-  const roots = [...(await findLocalDirs()), ...(await readCustomPaths())];
+  const roots = [
+    ...(await findLocalDirs()),
+    ownLibraryDir(),
+    ...(await readCustomPaths()),
+  ];
   const inside = roots.some((root) => {
     const base = path.resolve(root);
     return resolved === base || resolved.startsWith(base + path.sep);
@@ -1134,6 +1150,39 @@ ipcMain.handle("wallpaper:remove-local-path", async (event, target) => {
     return { paths };
   } catch (err) {
     log(`Remove local path failed: ${errorText(err)}`);
+    return { error: errorText(err) };
+  }
+});
+
+ipcMain.handle("wallpaper:save-local-media", async (event, filePath, name) => {
+  assertLocalSender(event);
+  try {
+    const resolved = await assertLocalMediaPath(
+      filePath,
+      new Set([...LOCAL_VIDEO_EXTS, ...LOCAL_IMAGE_EXTS])
+    );
+    const libDir = ownLibraryDir();
+    if (resolved === libDir || resolved.startsWith(libDir + path.sep)) {
+      return { saved: false, alreadyInLibrary: true };
+    }
+    await fsp.mkdir(libDir, { recursive: true });
+    const ext = path.extname(resolved).toLowerCase();
+    const base =
+      sanitizeName(name) || path.basename(resolved, path.extname(resolved));
+    const srcSize = (await fsp.stat(resolved)).size;
+    let dest = path.join(libDir, base + ext);
+    let suffix = 2;
+    while (await fileExists(dest)) {
+      if ((await fsp.stat(dest)).size === srcSize) {
+        return { saved: false, alreadyInLibrary: true, path: dest };
+      }
+      dest = path.join(libDir, `${base}-${suffix++}${ext}`);
+    }
+    await fsp.copyFile(resolved, dest);
+    log(`Saved to library: ${dest}`);
+    return { saved: true, path: dest };
+  } catch (err) {
+    log(`Save to library failed: ${errorText(err)}`);
     return { error: errorText(err) };
   }
 });
